@@ -24,7 +24,7 @@ type User struct {
   UpdatedAt   string `json:"updated_at"`
 }
 
-type UserCredentials struct {
+type UserCreation struct {
   FirstName   string `json:"first_name"`
   MiddleName  string `json:"middle_name"`
   LastName    string `json:"last_name"`
@@ -42,7 +42,7 @@ func NewUserService(db *sql.DB) *UserService {
   return &UserService{db}
 }
 
-func (s *UserService) SignUp(ctx context.Context, credentials *UserCredentials) (insertedID int, err error) {
+func (s *UserService) SignUp(ctx context.Context, credentials *UserCreation) (insertedID int, err error) {
   tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
   if nil != err {
     slog.Error(err.Error())
@@ -97,17 +97,17 @@ func NewUserHandler(service *UserService) *UserHandler {
 }
 
 func (h *UserHandler) SignUp(w http.ResponseWriter, r *http.Request) {
-  credentials := UserCredentials{}
+  userCreation := UserCreation{}
 
   decoder := json.NewDecoder(r.Body)
-  err := decoder.Decode(&credentials)
+  err := decoder.Decode(&userCreation)
   if err != nil {
     slog.Error(err.Error())
     w.WriteHeader(http.StatusInternalServerError)
     return
   }
 
-  insertedID, err := h.s.SignUp(context.TODO(), &credentials)
+  insertedID, err := h.s.SignUp(context.TODO(), &userCreation)
   if err != nil {
     slog.Error(err.Error())
     w.WriteHeader(http.StatusInternalServerError)
