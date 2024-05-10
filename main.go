@@ -4,6 +4,9 @@ import (
   "database/sql"
   _ "github.com/mattn/go-sqlite3"
   "log"
+  "net"
+  "net/http"
+  "time"
 )
 
 func main() {
@@ -19,4 +22,23 @@ func main() {
     log.Fatalf("could not ping database: %v", err)
   }
 
+  mux := http.NewServeMux()
+
+  listener, err := net.Listen("tcp", ":3456")
+  if nil != err {
+    log.Fatalf("could not open listener: %v", err)
+  }
+
+  defer listener.Close()
+
+  server := http.Server{
+    Addr:              "",
+    Handler:           mux,
+    ReadTimeout:       5 * time.Minute,
+    ReadHeaderTimeout: 5 * time.Minute,
+    WriteTimeout:      5 * time.Minute,
+    IdleTimeout:       120 * time.Minute,
+  }
+
+  log.Fatal(server.Serve(listener))
 }
