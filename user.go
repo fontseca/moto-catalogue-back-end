@@ -34,6 +34,11 @@ type UserCreation struct {
   Password    string `json:"password"`
 }
 
+type UserCredentials struct {
+  Email    string `json:"email"`
+  Password string `json:"password"`
+}
+
 type UserService struct {
   db *sql.DB
 }
@@ -88,6 +93,55 @@ func (s *UserService) SignUp(ctx context.Context, credentials *UserCreation) (in
   return insertedID, nil
 }
 
+func (s *UserService) SignIn(ctx context.Context, credentials *UserCredentials) (token string, err error) {
+  getUserPasswordQuery := `
+  SELECT id, password
+    FROM "user"
+   WHERE email = @email;`
+
+  var (
+    userID        string
+    savedPassword string
+  )
+
+  err = s.db.QueryRowContext(ctx, getUserPasswordQuery, sql.Named("email", credentials.Email)).Scan(&userID, &savedPassword)
+  if nil != err {
+    slog.Error(err.Error())
+    return "", err
+  }
+
+  err = bcrypt.CompareHashAndPassword([]byte(savedPassword), []byte(credentials.Password))
+  if nil != err {
+    if !errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+      slog.Error(err.Error())
+    }
+
+    return "", err
+  }
+
+  claims := jwt.MapClaims{
+    "iss":     "noda",
+    "sub":     "authentication",
+    "iat":     jwt.NewNumericDate(time.Now()),
+    "exp":     jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+    "user_id": userID,
+  }
+
+  t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+  secret := os.Getenv("JWT_SECRET")
+  if "" == secret {
+    secret = "default secret"
+  }
+
+  ss, err := t.SignedString([]byte(secret))
+  if nil != err {
+    slog.Error(err.Error())
+    return "", err
+  }
+
+  return ss, nil
+}
+
 type UserHandler struct {
   s *UserService
 }
@@ -117,4 +171,25 @@ func (h *UserHandler) SignUp(w http.ResponseWriter, r *http.Request) {
   w.Header().Set("Content-Type", "application/json")
   w.WriteHeader(http.StatusCreated)
   w.Write([]byte(`{"inserted_id":` + strconv.Itoa(insertedID) + `}`))
+}
+
+func (h *UserHandler) SignIn(w http.ResponseWriter, r *http.Request) {
+  credentials := UserCredentials{}
+
+  decoder := json.NewDecoder(r.Body)
+  err := decoder.Decode(&credentials)
+  if err != nil {
+    slog.Error(err.Error())
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+
+  token, err := h.s.SignIn(context.TODO(), &credentials)
+  if err != nil {
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+
+  w.WriteHeader(http.StatusCreated)
+  w.Write([]byte(`{"token":"` + token + `"}`))
 }
