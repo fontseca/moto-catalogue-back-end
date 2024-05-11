@@ -23,7 +23,7 @@ func setHeader(key, value string) func(http.Handler) http.Handler {
   }
 }
 
-func withAuthorization(next http.Handler) http.HandlerFunc {
+func withAuthorization(next http.HandlerFunc) http.HandlerFunc {
   secret := os.Getenv("JWT_SECRET")
   if "" == secret {
     secret = "default secret"
@@ -51,9 +51,9 @@ func withAuthorization(next http.Handler) http.HandlerFunc {
     }
 
     claims := token.Claims.(jwt.MapClaims)
-    userID := claims["user_id"].(int)
+    userID := claims["user_id"].(float64)
 
-    ctx := context.WithValue(r.Context(), "user_id", userID)
+    ctx := context.WithValue(r.Context(), "user_id", int(userID))
     r = r.Clone(ctx)
 
     next.ServeHTTP(w, r)

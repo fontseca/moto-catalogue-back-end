@@ -104,7 +104,7 @@ func (s *UserService) SignIn(ctx context.Context, credentials *UserCredentials) 
    WHERE email = @email;`
 
   var (
-    userID        string
+    userID        int
     savedPassword string
   )
 
@@ -251,6 +251,31 @@ func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(http.StatusInternalServerError)
     return
   }
+
+  user, err := h.s.GetByID(context.TODO(), userID)
+  if nil != err {
+    if errors.Is(err, sql.ErrNoRows) {
+      w.WriteHeader(http.StatusNotFound)
+    } else {
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+
+    return
+  }
+
+  response, err := json.Marshal(user)
+  if nil != err {
+    slog.Error(err.Error())
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+
+  w.WriteHeader(http.StatusOK)
+  w.Write(response)
+}
+
+func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
+  userID := r.Context().Value("user_id").(int)
 
   user, err := h.s.GetByID(context.TODO(), userID)
   if nil != err {
