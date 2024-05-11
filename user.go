@@ -4,24 +4,28 @@ import (
   "context"
   "database/sql"
   "encoding/json"
+  "errors"
+  "github.com/golang-jwt/jwt/v5"
   "golang.org/x/crypto/bcrypt"
   "log/slog"
   "net/http"
+  "os"
   "strconv"
   "time"
 )
 
 type User struct {
-  ID          int    `json:"id"`
-  FirstName   string `json:"first_name"`
-  MiddleName  string `json:"middle_name"`
-  LastName    string `json:"last_name"`
-  Surname     string `json:"surname"`
-  Email       string `json:"email"`
-  PhoneNumber string `json:"phone_number"`
-  Password    string
-  CreatedAt   string `json:"created_at"`
-  UpdatedAt   string `json:"updated_at"`
+  ID          int     `json:"id"`
+  FirstName   string  `json:"first_name"`
+  MiddleName  *string `json:"middle_name"`
+  LastName    *string `json:"last_name"`
+  Surname     *string `json:"surname"`
+  Email       string  `json:"email"`
+  PhoneNumber string  `json:"phone_number"`
+  PictureURL  *string `json:"picture_url"`
+  Password    string  `json:"-"`
+  CreatedAt   string  `json:"created_at"`
+  UpdatedAt   string  `json:"updated_at"`
 }
 
 type UserCreation struct {
@@ -142,6 +146,51 @@ func (s *UserService) SignIn(ctx context.Context, credentials *UserCredentials) 
   return ss, nil
 }
 
+func (s *UserService) GetByID(ctx context.Context, id int) (user *User, err error) {
+  getUserQuery := `
+  SELECT id,
+         first_name,
+         middle_name,
+         last_name,
+         surname,
+         email,
+         phone_number,
+         picture_url,
+         password,
+         created_at,
+         updated_at
+    FROM "user"
+   WHERE id = $1;`
+
+  ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+  defer cancel()
+
+  row := s.db.QueryRowContext(ctx, getUserQuery, id)
+
+  user = new(User)
+
+  err = row.Scan(
+    &user.ID,
+    &user.FirstName,
+    &user.MiddleName,
+    &user.LastName,
+    &user.Surname,
+    &user.Email,
+    &user.PhoneNumber,
+    &user.PictureURL,
+    &user.Password,
+    &user.CreatedAt,
+    &user.UpdatedAt,
+  )
+
+  if nil != err {
+    slog.Error(err.Error())
+    return nil, err
+  }
+
+  return user, nil
+}
+
 type UserHandler struct {
   s *UserService
 }
@@ -168,7 +217,6 @@ func (h *UserHandler) SignUp(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  w.Header().Set("Content-Type", "application/json")
   w.WriteHeader(http.StatusCreated)
   w.Write([]byte(`{"inserted_id":` + strconv.Itoa(insertedID) + `}`))
 }
@@ -192,4 +240,36 @@ func (h *UserHandler) SignIn(w http.ResponseWriter, r *http.Request) {
 
   w.WriteHeader(http.StatusCreated)
   w.Write([]byte(`{"token":"` + token + `"}`))
+}
+
+func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+  userIDStr := r.PathValue("user_id")
+
+  userID, err := strconv.Atoi(userIDStr)
+  if nil != err {
+    slog.Error(err.Error())
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+
+  user, err := h.s.GetByID(context.TODO(), userID)
+  if nil != err {
+    if errors.Is(err, sql.ErrNoRows) {
+      w.WriteHeader(http.StatusNotFound)
+    } else {
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+
+    return
+  }
+
+  response, err := json.Marshal(user)
+  if nil != err {
+    slog.Error(err.Error())
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+
+  w.WriteHeader(http.StatusOK)
+  w.Write(response)
 }
