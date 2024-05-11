@@ -89,6 +89,19 @@ func main() {
 
   mux := http.NewServeMux()
 
+  userService := NewUserService(db)
+  userHandler := NewUserHandler(userService)
+
+  mux.HandleFunc("POST /signup", userHandler.SignUp)
+  mux.HandleFunc("POST /login", userHandler.SignIn)
+
+  mux.HandleFunc("GET /me", withAuthorization(userHandler.GetMe))
+  mux.HandleFunc("PATCH /me", withAuthorization(userHandler.UpdateMe))
+  mux.HandleFunc("DELETE /me", withAuthorization(userHandler.DeleteMe))
+
+  mux.HandleFunc("GET /users", withAuthorization(userHandler.Get))
+  mux.HandleFunc("GET /users/{user_id}", withAuthorization(userHandler.GetByID))
+
   listener, err := net.Listen("tcp", ":3456")
   if nil != err {
     log.Fatalf("could not open listener: %v", err)
