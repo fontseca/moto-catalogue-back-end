@@ -312,6 +312,41 @@ func (s *UserService) Update(ctx context.Context, id int, update *UserUpdate) er
   return nil
 }
 
+func (s *UserService) Delete(ctx context.Context, id int) error {
+  tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+  if nil != err {
+    slog.Error(err.Error())
+    return err
+  }
+
+  defer tx.Rollback()
+
+  deleteUserQuery := `
+  DELETE
+    FROM "user"
+   WHERE id = $1;`
+
+  ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+  defer cancel()
+
+  result, err := tx.ExecContext(ctx, deleteUserQuery, id)
+  if nil != err {
+    slog.Error(err.Error())
+    return err
+  }
+
+  if affected, _ := result.RowsAffected(); 1 != affected {
+    return errors.New("user not found")
+  }
+
+  if err = tx.Commit(); nil != err {
+    slog.Error(err.Error())
+    return err
+  }
+
+  return nil
+}
+
 type UserHandler struct {
   s *UserService
 }
@@ -466,7 +501,29 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 
   err = h.s.Update(r.Context(), userID, &userUpdate)
   if nil != err {
-    w.WriteHeader(http.StatusInternalServerError)
+    if strings.Contains(err.Error(), "user not found") {
+      w.WriteHeader(http.StatusNotFound)
+    } else {
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+
+    return
+  }
+
+  w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *UserHandler) DeleteMe(w http.ResponseWriter, r *http.Request) {
+  userID := r.Context().Value("user_id").(int)
+
+  err := h.s.Delete(r.Context(), userID)
+  if nil != err {
+    if strings.Contains(err.Error(), "user not found") {
+      w.WriteHeader(http.StatusNotFound)
+    } else {
+      w.WriteHeader(http.StatusInternalServerError)
+    }
+
     return
   }
 
