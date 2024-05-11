@@ -11,6 +11,7 @@ import (
   "net/http"
   "os"
   "strconv"
+  "strings"
   "time"
 )
 
@@ -36,6 +37,17 @@ type UserCreation struct {
   Email       string `json:"email"`
   PhoneNumber string `json:"phone_number"`
   Password    string `json:"password"`
+}
+
+type UserUpdate struct {
+  FirstName   string `json:"first_name"`
+  MiddleName  string `json:"middle_name"`
+  LastName    string `json:"last_name"`
+  Surname     string `json:"surname"`
+  Email       string `json:"email"`
+  PhoneNumber string `json:"phone_number"`
+  Password    string `json:"password"`
+  PictureURL  string `json:"picture_url"`
 }
 
 type UserCredentials struct {
@@ -75,12 +87,12 @@ func (s *UserService) SignUp(ctx context.Context, credentials *UserCreation) (in
   defer cancel()
 
   err = tx.QueryRowContext(ctx, registerUserQuery,
-    sql.Named("first_name", credentials.FirstName),
-    sql.Named("middle_name", credentials.MiddleName),
-    sql.Named("last_name", credentials.LastName),
-    sql.Named("surname", credentials.Surname),
-    sql.Named("email", credentials.Email),
-    sql.Named("phone_number", credentials.PhoneNumber),
+    sql.Named("first_name", strings.TrimSpace(credentials.FirstName)),
+    sql.Named("middle_name", strings.TrimSpace(credentials.MiddleName)),
+    sql.Named("last_name", strings.TrimSpace(credentials.LastName)),
+    sql.Named("surname", strings.TrimSpace(credentials.Surname)),
+    sql.Named("email", strings.TrimSpace(credentials.Email)),
+    sql.Named("phone_number", strings.TrimSpace(credentials.PhoneNumber)),
     sql.Named("password", hashedPassword)).
     Scan(&insertedID)
 
@@ -246,6 +258,60 @@ ORDER BY created_at
   return users, nil
 }
 
+func (s *UserService) Update(ctx context.Context, id int, update *UserUpdate) error {
+  tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+  if nil != err {
+    slog.Error(err.Error())
+    return err
+  }
+
+  defer tx.Rollback()
+
+  updateUserQuery := `
+  UPDATE "user"
+     SET first_name = coalesce(nullif(@first_name, ''), first_name),
+         middle_name = coalesce(nullif(@middle_name, ''), middle_name),
+         last_name = coalesce(nullif(@last_name, ''), last_name),
+         surname = coalesce(nullif(@surname, ''), surname),
+         email = coalesce(nullif(@email, ''), email),
+         phone_number = coalesce(nullif(@phone_number, ''), phone_number),
+         picture_url = coalesce(nullif(@picture_url, ''), picture_url),
+         password = coalesce(nullif(@password, ''), password),
+         updated_at = current_timestamp
+   WHERE id = @id;`
+
+  ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+  defer cancel()
+
+  result, err := tx.ExecContext(ctx, updateUserQuery,
+    sql.Named("id", id),
+    sql.Named("first_name", strings.TrimSpace(update.FirstName)),
+    sql.Named("middle_name", strings.TrimSpace(update.MiddleName)),
+    sql.Named("last_name", strings.TrimSpace(update.LastName)),
+    sql.Named("surname", strings.TrimSpace(update.Surname)),
+    sql.Named("email", strings.TrimSpace(update.Email)),
+    sql.Named("phone_number", strings.TrimSpace(update.PhoneNumber)),
+    sql.Named("picture_url", strings.TrimSpace(update.PictureURL)),
+    sql.Named("password", strings.TrimSpace(update.Password)),
+  )
+
+  if nil != err {
+    slog.Error(err.Error())
+    return err
+  }
+
+  if affected, _ := result.RowsAffected(); 1 != affected {
+    return errors.New("user not found")
+  }
+
+  if err = tx.Commit(); nil != err {
+    slog.Error(err.Error())
+    return err
+  }
+
+  return nil
+}
+
 type UserHandler struct {
   s *UserService
 }
@@ -384,4 +450,25 @@ func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
 
   w.WriteHeader(http.StatusOK)
   w.Write(response)
+}
+
+func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
+  userID := r.Context().Value("user_id").(int)
+  userUpdate := UserUpdate{}
+
+  decoder := json.NewDecoder(r.Body)
+  err := decoder.Decode(&userUpdate)
+  if nil != err {
+    slog.Error(err.Error())
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+
+  err = h.s.Update(r.Context(), userID, &userUpdate)
+  if nil != err {
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+
+  w.WriteHeader(http.StatusNoContent)
 }
