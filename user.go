@@ -191,6 +191,61 @@ func (s *UserService) GetByID(ctx context.Context, id int) (user *User, err erro
   return user, nil
 }
 
+func (s *UserService) Get(ctx context.Context, page int) (users []*User, err error) {
+  getUsersQuery := `
+  SELECT id,
+         first_name,
+         middle_name,
+         last_name,
+         surname,
+         email,
+         phone_number,
+         picture_url,
+         created_at,
+         updated_at
+    FROM "user"
+ORDER BY created_at
+   LIMIT 10
+   OFFSET 10 * (@page - 1);`
+
+  ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+  defer cancel()
+
+  result, err := s.db.QueryContext(ctx, getUsersQuery, sql.Named("page", page))
+  if nil != err {
+    slog.Error(err.Error())
+    return nil, err
+  }
+
+  users = make([]*User, 0)
+
+  for result.Next() {
+    user := new(User)
+
+    err = result.Scan(
+      &user.ID,
+      &user.FirstName,
+      &user.MiddleName,
+      &user.LastName,
+      &user.Surname,
+      &user.Email,
+      &user.PhoneNumber,
+      &user.PictureURL,
+      &user.CreatedAt,
+      &user.UpdatedAt,
+    )
+
+    if nil != err {
+      slog.Error(err.Error())
+      return nil, err
+    }
+
+    users = append(users, user)
+  }
+
+  return users, nil
+}
+
 type UserHandler struct {
   s *UserService
 }
@@ -232,7 +287,7 @@ func (h *UserHandler) SignIn(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  token, err := h.s.SignIn(context.TODO(), &credentials)
+  token, err := h.s.SignIn(r.Context(), &credentials)
   if err != nil {
     w.WriteHeader(http.StatusInternalServerError)
     return
@@ -252,7 +307,7 @@ func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  user, err := h.s.GetByID(context.TODO(), userID)
+  user, err := h.s.GetByID(r.Context(), userID)
   if nil != err {
     if errors.Is(err, sql.ErrNoRows) {
       w.WriteHeader(http.StatusNotFound)
@@ -277,7 +332,7 @@ func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
   userID := r.Context().Value("user_id").(int)
 
-  user, err := h.s.GetByID(context.TODO(), userID)
+  user, err := h.s.GetByID(r.Context(), userID)
   if nil != err {
     if errors.Is(err, sql.ErrNoRows) {
       w.WriteHeader(http.StatusNotFound)
@@ -289,6 +344,38 @@ func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
   }
 
   response, err := json.Marshal(user)
+  if nil != err {
+    slog.Error(err.Error())
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+
+  w.WriteHeader(http.StatusOK)
+  w.Write(response)
+}
+
+func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
+  pageStr := r.URL.Query().Get("page")
+  page := 1
+
+  var err error
+
+  if "" != pageStr {
+    page, err = strconv.Atoi(pageStr)
+    if nil != err {
+      slog.Error(err.Error())
+      w.WriteHeader(http.StatusInternalServerError)
+      return
+    }
+  }
+
+  users, err := h.s.Get(r.Context(), page)
+  if nil != err {
+    w.WriteHeader(http.StatusInternalServerError)
+    return
+  }
+
+  response, err := json.Marshal(users)
   if nil != err {
     slog.Error(err.Error())
     w.WriteHeader(http.StatusInternalServerError)
