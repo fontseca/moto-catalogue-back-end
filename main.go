@@ -102,7 +102,15 @@ func main() {
   mux.HandleFunc("GET /users", withAuthorization(userHandler.Get))
   mux.HandleFunc("GET /users/{user_id}", withAuthorization(userHandler.GetByID))
 
-  listener, err := net.Listen("tcp", ":3456")
+  motorcycleService := NewMotorcycleService(db)
+  motorcycleHandler := NewMotorcycleHandler(motorcycleService)
+
+  mux.HandleFunc("POST /me/motorcycles", withAuthorization(motorcycleHandler.Create))
+  mux.HandleFunc("GET /me/motorcycles", withAuthorization(motorcycleHandler.Get))
+
+  port := os.Getenv("PORT")
+
+  listener, err := net.Listen("tcp", ":"+port)
   if nil != err {
     log.Fatalf("could not open listener: %v", err)
   }
